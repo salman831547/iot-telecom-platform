@@ -143,3 +143,69 @@ terraform state list | wc -l                                   # 40
 ```bash
 uv run python scripts/tf.py plan bootstrap -- -detailed-exitcode   # "No changes", exit 0
 ```
+
+### B.7 Lock provider hashes for every platform 🛠️
+
+`init` on Windows only records Windows hashes, and Linux CI would then fail to verify the provider.
+
+```bash
+terraform -chdir=infra/terraform/00-bootstrap providers lock \
+  -platform=linux_amd64 -platform=windows_amd64 -platform=darwin_arm64 -platform=darwin_amd64
+```
+
+### B.8 GitHub login (repo owner, interactive) 🛠️
+
+```powershell
+# A terminal opened before the winget install needs PATH reloaded (or open a new terminal):
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+gh auth login --hostname github.com --git-protocol https --web
+gh auth status
+```
+
+### B.9 Pre-publish privacy check, commit email → GitHub no-reply 🛠️
+
+The repo is **public**, so history is scanned before the first push, and unpushed commits are
+re-authored with the no-reply address so the personal email is never published.
+
+```bash
+git grep -nIE 'gmail|billingAccount|gho_|AIza|BEGIN .*PRIVATE' $(git rev-list --all) -- .   # no hits
+uv run pre-commit run gitleaks --all-files                                                 # Passed
+git config user.email "48931885+salman831547@users.noreply.github.com"                     # repo-local
+git stash
+git rebase --root --exec 'git commit --amend --no-edit --reset-author -q' feat/phase-b-bootstrap
+git branch -f main $(git rev-list --max-parents=0 HEAD)
+git stash pop
+git log --format='%h %ae %s' --all                                                         # verify
+```
+
+### B.10 Create the public repo and push ☁️
+
+```powershell
+gh repo create salman831547/iot-telecom-platform --public --description "<...>" --source . --remote origin
+git push -u origin main
+git push -u origin feat/phase-b-bootstrap
+gh repo edit salman831547/iot-telecom-platform --delete-branch-on-merge --enable-squash-merge `
+  --enable-merge-commit=false --enable-rebase-merge=false --enable-wiki=false
+```
+
+### B.11 Repo settings as code (variables, environment, ruleset) ☁️
+
+```powershell
+uv run python scripts/github_repo.py all        # idempotent; re-run any time config changes
+gh variable list --repo salman831547/iot-telecom-platform
+gh api repos/salman831547/iot-telecom-platform/environments/dev --jq '{name, rules: [.protection_rules[].type]}'
+gh api repos/salman831547/iot-telecom-platform/rulesets --jq '.[] | {name, enforcement}'
+```
+
+Result:
+- 8 repo variables are set, among them `GCP_WIF_PROVIDER` and the 3 service-account emails.
+- Environment `dev` requires reviewers (the owner) and only allows deployments from `main`.
+- Ruleset `protect-deploy-branch` (active) blocks deletion and force-push, and requires linear history and a PR.
+
+### B.12 Open the Phase B pull request ☁️
+
+```powershell
+git add -A; git commit -F <path-to>/commit-msg.txt
+git push
+gh pr create --base main --head feat/phase-b-bootstrap --title "<...>" --body-file <path-to>/pr-body.md
+```

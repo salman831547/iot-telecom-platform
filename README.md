@@ -105,6 +105,14 @@ uv run python scripts/tf.py plan bootstrap     # later: drift check
 
 All other layers run through `scripts/tf.py <init|plan|apply|destroy> <foundation|composer>`. It reads the backend bucket and prefix from config, so nothing is typed by hand.
 
+GitHub settings are also code ([`scripts/github_repo.py`](scripts/github_repo.py), idempotent):
+
+| Setting | Value |
+|---|---|
+| Repo variables | `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_WIF_PROVIDER`, `GCP_SA_*`, `TF_STATE_BUCKET`, `IOT_ENV`, read from Terraform outputs. No secrets exist |
+| Environment `dev` | Owner approval required; only `main` may deploy |
+| Ruleset on `main` | PR required, linear history (squash only), no force-push or deletion. CI status checks are added in Phase F |
+
 ## Security
 
 - **No long-lived keys.** GitHub authenticates through Workload Identity Federation. The provider only accepts tokens from this repo, and apply only runs from `main` behind an approval environment.
@@ -128,6 +136,7 @@ dags/                 Airflow DAGs (Phase E)
 sql/                  Versioned BigQuery SQL (Phase E)
 infra/terraform/      00-bootstrap · 10-foundation · 20-composer · modules (Phases B, C, G)
 scripts/tf.py         Config-driven Terraform wrapper (backend + env injected from YAML)
+scripts/github_repo.py  GitHub variables, environment and branch ruleset as code
 cloudbuild/           Cloud Build configs (Phase F)
 .github/              Workflows, CODEOWNERS, Dependabot, PR template
 tests/                Unit tests (+ DAG integrity tests)

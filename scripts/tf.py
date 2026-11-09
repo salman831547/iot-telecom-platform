@@ -10,7 +10,8 @@ Usage:
     uv run python scripts/tf.py apply <layer> [-- -auto-approve]
     uv run python scripts/tf.py destroy <layer>
     uv run python scripts/tf.py output <layer> [-- -json]
-    uv run python scripts/tf.py gh-vars                     # publish bootstrap outputs to GitHub
+
+GitHub repo settings (variables, environment, ruleset): scripts/github_repo.py
 
 Layers: bootstrap | foundation | composer
 """
@@ -18,7 +19,6 @@ Layers: bootstrap | foundation | composer
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shutil
 import subprocess
@@ -134,28 +134,6 @@ def cmd_bootstrap(cfg: EnvConfig, extra: list[str]) -> None:
     run(["state", "list"], layer_dir, env)  # proves remote state is readable
 
 
-def cmd_gh_vars(cfg: EnvConfig) -> None:
-    """Publish bootstrap outputs as GitHub repository variables (non-secret)."""
-    layer_dir = LAYER_DIRS["bootstrap"]
-    out = subprocess.run(  # noqa: S603
-        [_terraform(), "output", "-json", "github_variables"],
-        cwd=layer_dir,
-        env=tf_env(cfg),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    variables: dict[str, str] = json.loads(out.stdout)
-    variables["IOT_ENV"] = cfg.env
-    gh = shutil.which("gh") or sys.exit("gh CLI not found on PATH")
-    for name, value in sorted(variables.items()):
-        _log(f"gh variable set {name}")
-        subprocess.run(  # noqa: S603
-            [gh, "variable", "set", name, "--body", value, "--repo", cfg.github.full_name],
-            check=True,
-        )
-
-
 def main(argv: list[str] | None = None) -> None:
     argv = list(sys.argv[1:] if argv is None else argv)
     extra: list[str] = []
@@ -165,7 +143,7 @@ def main(argv: list[str] | None = None) -> None:
 
     parser = argparse.ArgumentParser(prog="scripts/tf.py", description=__doc__.split("\n")[0])
     parser.add_argument(
-        "command", choices=["bootstrap", "init", "plan", "apply", "destroy", "output", "gh-vars"]
+        "command", choices=["bootstrap", "init", "plan", "apply", "destroy", "output"]
     )
     parser.add_argument("layer", nargs="?", choices=sorted(LAYER_DIRS))
     parser.add_argument("--env", default=os.environ.get("IOT_ENV", "dev"))
@@ -175,8 +153,6 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "bootstrap":
         cmd_bootstrap(cfg, extra)
-    elif args.command == "gh-vars":
-        cmd_gh_vars(cfg)
     else:
         if not args.layer:
             parser.error(f"'{args.command}' requires a layer")
