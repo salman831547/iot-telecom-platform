@@ -1,0 +1,4 @@
+# The shared library is deployed next to the DAGs (dags/iot_pipeline/) so it is
+# importable on every Airflow component. It contains no DAGs, so it is not parsed.
+iot_pipeline/
+__pycache__/

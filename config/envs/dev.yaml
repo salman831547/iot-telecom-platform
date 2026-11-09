@@ -111,6 +111,9 @@ storage:
     name: project-2026-ai-iot-dev-composer
     versioning: true
     noncurrent_versions_to_keep: 5
+  cloudbuild_bucket: # source tarballs for `gcloud builds submit` (short-lived)
+    name: project-2026-ai-iot-dev-cloudbuild
+    delete_after_days: 7
 
 bigquery:
   location: us-central1
@@ -133,7 +136,7 @@ secrets:
 
 composer:
   environment_name: iot-dev-composer
-  image_version: composer-3-airflow-2.10.5 # TODO(verify in Phase G): latest GA image in region
+  image_version: composer-3-airflow-3.3.1-build.5 # latest Composer 3 image in us-central1 (2026-10-27)
   environment_size: ENVIRONMENT_SIZE_SMALL
   private_environment: true
   resilience_mode: STANDARD_RESILIENCE
@@ -183,9 +186,22 @@ pipeline:
     gold_cell_hourly: cell_hourly_kpis
     ops_watermarks: watermarks
     ops_audit: batch_audit
+  silver:
+    watermark_key: raw_to_silver # row key in iot_ops.watermarks
+    max_files_per_run: 48 # bounds catch-up work after downtime (e.g. Composer rebuild)
   data_quality:
     min_rows_per_batch: 100
     max_invalid_ratio: 0.20
+    # Rows outside these ranges are kept in silver with is_valid=false and a dq_flag.
+    valid_ranges:
+      rsrp_dbm: [-140, -44]
+      rsrq_db: [-20, -3]
+      sinr_db: [-20, 30]
+      battery_pct: [0, 100]
+      temperature_c: [-40, 85]
+    # Operator footprint (US, MCC 310). Catches swapped lat/long that are still "valid" numbers.
+    service_area: { lat_min: 18.0, lat_max: 72.0, lon_min: -170.0, lon_max: -60.0 }
+    poor_coverage_rsrp_dbm: -110 # gold: share of events below this = poor_coverage_ratio
 
 generator:
   seed_strategy: logical_date # deterministic per interval -> idempotent re-runs

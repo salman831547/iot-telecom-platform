@@ -173,10 +173,21 @@ class ComposerBucketConfig(_Strict):
         return _validate_bucket(v)
 
 
+class CloudBuildBucketConfig(_Strict):
+    name: str
+    delete_after_days: PositiveInt
+
+    @field_validator("name")
+    @classmethod
+    def _valid_bucket(cls, v: str) -> str:
+        return _validate_bucket(v)
+
+
 class StorageConfig(_Strict):
     location: str
     staging_bucket: StagingBucketConfig
     composer_bucket: ComposerBucketConfig
+    cloudbuild_bucket: CloudBuildBucketConfig
 
 
 class DatasetConfig(_Strict):
@@ -298,9 +309,60 @@ class TableNames(_Strict):
     ops_audit: str
 
 
+class Range(_Strict):
+    """[min, max] inclusive bounds, written in YAML as a 2-item list."""
+
+    low: float
+    high: float
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_list(cls, v: object) -> object:
+        if isinstance(v, list | tuple):
+            if len(v) != 2:
+                raise ValueError("range must be [min, max]")
+            return {"low": v[0], "high": v[1]}
+        return v
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Range:
+        if self.low >= self.high:
+            raise ValueError("range min must be < max")
+        return self
+
+
+class ValidRanges(_Strict):
+    rsrp_dbm: Range
+    rsrq_db: Range
+    sinr_db: Range
+    battery_pct: Range
+    temperature_c: Range
+
+
+class ServiceArea(_Strict):
+    lat_min: Annotated[float, Field(ge=-90, le=90)]
+    lat_max: Annotated[float, Field(ge=-90, le=90)]
+    lon_min: Annotated[float, Field(ge=-180, le=180)]
+    lon_max: Annotated[float, Field(ge=-180, le=180)]
+
+    @model_validator(mode="after")
+    def _ordered(self) -> ServiceArea:
+        if self.lat_min >= self.lat_max or self.lon_min >= self.lon_max:
+            raise ValueError("service_area min must be < max")
+        return self
+
+
 class DataQualityConfig(_Strict):
     min_rows_per_batch: PositiveInt
     max_invalid_ratio: Ratio
+    valid_ranges: ValidRanges
+    service_area: ServiceArea
+    poor_coverage_rsrp_dbm: Annotated[float, Field(ge=-140, le=-44)]
+
+
+class SilverConfig(_Strict):
+    watermark_key: str
+    max_files_per_run: PositiveInt
 
 
 class PipelineConfig(_Strict):
@@ -316,6 +378,7 @@ class PipelineConfig(_Strict):
     dags: DagIds
     raw: RawLayout
     tables: TableNames
+    silver: SilverConfig
     data_quality: DataQualityConfig
 
     @field_validator("start_date")

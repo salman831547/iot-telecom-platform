@@ -69,3 +69,27 @@ resource "google_storage_bucket" "composer" {
     prevent_destroy = true
   }
 }
+
+# --- Cloud Build source bucket (gcloud builds submit --gcs-source-staging-dir) -------
+# Builds run as the least-privilege deployer SA, which can READ sources here and
+# nothing else. Tarballs are short-lived.
+resource "google_storage_bucket" "cloudbuild" {
+  name          = local.storage.cloudbuild_bucket.name
+  project       = local.project_id
+  location      = local.storage.location
+  storage_class = "STANDARD"
+
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+
+  lifecycle_rule {
+    condition {
+      age = local.storage.cloudbuild_bucket.delete_after_days
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  labels = merge(local.labels, { data-layer = "ci" })
+}

@@ -92,3 +92,16 @@ resource "google_storage_bucket_iam_member" "deployer_write" {
     ])
   }
 }
+
+# --- Cloud Build sources: submitters write, deployer reads -----------------------
+resource "google_storage_bucket_iam_member" "cloudbuild_sources_deployer_read" {
+  bucket = google_storage_bucket.cloudbuild.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${local.sa_email.cloudbuild_deployer}"
+}
+
+resource "google_storage_bucket_iam_member" "cloudbuild_sources_ci_write" {
+  bucket = google_storage_bucket.cloudbuild.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${local.sa_email.tf_apply}"
+}

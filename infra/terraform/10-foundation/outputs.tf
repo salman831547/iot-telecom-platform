@@ -28,3 +28,7 @@ output "tables" {
 output "pii_salt_secret" {
   value = google_secret_manager_secret.pii_hash_salt.secret_id
 }
+
+output "cloudbuild_bucket" {
+  value = google_storage_bucket.cloudbuild.name
+}
