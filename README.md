@@ -6,7 +6,7 @@ Production-style, config-driven data platform for telecom IoT telemetry on Googl
 
 | | |
 |---|---|
-| **Status** | Step 1 · Phase A (repo foundation) ✅ |
+| **Status** | Step 1 · Phase B (Terraform bootstrap) ✅ |
 | **Cloud** | GCP · `project-2026-ai` · `us-central1` |
 | **Env config** | [`config/envs/dev.yaml`](config/envs/dev.yaml): one file drives Terraform, DAGs and the generator |
 | **Command log** | [`docs/COMMANDS.md`](docs/COMMANDS.md): every command run to build this project |
@@ -77,6 +77,42 @@ flowchart LR
 
 Each DAG triggers the next. Every task is **idempotent**: re-running an interval gives the same result. Loads are **incremental** from a watermark, so downtime or a Composer rebuild leaves no gaps.
 
+## CI/CD identity model
+
+```mermaid
+flowchart LR
+  subgraph GHA[GitHub Actions job]
+    T[OIDC token<br/>repo · owner_id · ref · environment]
+  end
+  T --> P{WIF provider<br/>condition: owner_id AND repo}
+  P -->|any ref, incl. PRs| PLAN[sa-iot-dev-tf-plan<br/>viewer · state read-only]
+  P -->|deploy = dev@refs/heads/main| APPLY[sa-iot-dev-tf-apply<br/>scoped admin roles]
+  APPLY -->|actAs| CBD[sa-iot-dev-cb-deployer<br/>Cloud Build]
+```
+
+| Identity | Who can use it | Can do | Cannot do |
+|---|---|---|---|
+| `tf-plan` | Any workflow in this repo (PRs) | Read the project and state (plan runs with `-lock=false`) | Write anything |
+| `tf-apply` | Only jobs on `main` **and** in the `dev` GitHub Environment | Manage foundation and composer resources, and grant only the allow-listed roles | Grant Owner/Editor; write bootstrap state |
+| `cb-deployer` | Cloud Build jobs submitted by `tf-apply` | Write logs (DAG bucket write is added in Phase C) | Anything else |
+
+`00-bootstrap` holds the CI identities' own permissions, so it is applied **only by a human owner**:
+
+```bash
+uv run python scripts/tf.py bootstrap          # first run: local state -> GCS migration
+uv run python scripts/tf.py plan bootstrap     # later: drift check
+```
+
+All other layers run through `scripts/tf.py <init|plan|apply|destroy> <foundation|composer>`. It reads the backend bucket and prefix from config, so nothing is typed by hand.
+
+GitHub settings are also code ([`scripts/github_repo.py`](scripts/github_repo.py), idempotent):
+
+| Setting | Value |
+|---|---|
+| Repo variables | `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_WIF_PROVIDER`, `GCP_SA_*`, `TF_STATE_BUCKET`, `IOT_ENV`, read from Terraform outputs. No secrets exist |
+| Environment `dev` | Owner approval required; only `main` may deploy |
+| Ruleset on `main` | PR required, linear history (squash only), no force-push or deletion. CI status checks are added in Phase F |
+
 ## Security
 
 - **No long-lived keys.** GitHub authenticates through Workload Identity Federation. The provider only accepts tokens from this repo, and apply only runs from `main` behind an approval environment.
@@ -99,6 +135,8 @@ src/iot_pipeline/     Reusable library: config loader, generator, GCS/BQ helpers
 dags/                 Airflow DAGs (Phase E)
 sql/                  Versioned BigQuery SQL (Phase E)
 infra/terraform/      00-bootstrap · 10-foundation · 20-composer · modules (Phases B, C, G)
+scripts/tf.py         Config-driven Terraform wrapper (backend + env injected from YAML)
+scripts/github_repo.py  GitHub variables, environment and branch ruleset as code
 cloudbuild/           Cloud Build configs (Phase F)
 .github/              Workflows, CODEOWNERS, Dependabot, PR template
 tests/                Unit tests (+ DAG integrity tests)
@@ -121,7 +159,7 @@ uv run python -m iot_pipeline.config validate config/envs/dev.yaml
 ## Roadmap: Step 1
 
 - [x] **A.** Repo foundation: config schema, tooling, governance
-- [ ] **B.** Terraform bootstrap: remote state, APIs, Workload Identity Federation, CI service accounts
+- [x] **B.** Terraform bootstrap: remote state, APIs, Workload Identity Federation, CI service accounts
 - [ ] **C.** Terraform foundation: buckets, BigQuery, runtime IAM, VPC, secrets
 - [ ] **D.** Library: data generator, GCS/BQ helpers
 - [ ] **E.** Three ETL DAGs and SQL

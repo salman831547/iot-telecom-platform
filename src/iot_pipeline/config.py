@@ -73,8 +73,14 @@ class ProjectConfig(_Strict):
 
 class GithubConfig(_Strict):
     owner: str
+    owner_id: Annotated[str, Field(pattern=r"^\d+$")]
     repo: str
     deploy_branch: str = "main"
+    environment: str
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.owner}/{self.repo}"
 
 
 class TerraformStatePrefixes(_Strict):
@@ -110,6 +116,26 @@ class ServiceAccounts(_Strict):
 class WorkloadIdentityConfig(_Strict):
     pool_id: str
     provider_id: str
+
+
+class IamConfig(_Strict):
+    tf_plan_project_roles: list[str]
+    tf_apply_project_roles: list[str]
+    tf_apply_grantable_roles: list[str]
+    cloudbuild_deployer_project_roles: list[str]
+
+    @field_validator("*")
+    @classmethod
+    def _valid_roles(cls, v: list[str]) -> list[str]:
+        forbidden = {"roles/owner", "roles/editor", "roles/resourcemanager.projectIamAdmin"}
+        for role in v:
+            if not role.startswith("roles/"):
+                raise ValueError(f"role must start with 'roles/': {role!r}")
+            if role in forbidden:
+                raise ValueError(f"{role} is too broad; grant scoped roles instead")
+        if len(set(v)) != len(v):
+            raise ValueError("duplicate roles")
+        return v
 
 
 class NetworkConfig(_Strict):
@@ -344,6 +370,7 @@ class EnvConfig(_Strict):
     apis: list[str]
     service_accounts: ServiceAccounts
     workload_identity: WorkloadIdentityConfig
+    iam: IamConfig
     network: NetworkConfig
     storage: StorageConfig
     bigquery: BigQueryConfig
