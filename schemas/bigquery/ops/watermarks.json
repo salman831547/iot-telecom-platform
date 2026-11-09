@@ -1,0 +1,13 @@
+{
+  "description": "Incremental-load watermarks per pipeline. Lives outside Airflow so a recreated Composer environment resumes exactly where the old one stopped.",
+  "partitioning": null,
+  "require_partition_filter": false,
+  "clustering": ["pipeline"],
+  "schema": [
+    { "name": "pipeline", "type": "STRING", "mode": "REQUIRED", "description": "Logical pipeline key, e.g. raw_to_silver." },
+    { "name": "watermark_ts", "type": "TIMESTAMP", "mode": "REQUIRED", "description": "High-water mark: everything at or before this is processed." },
+    { "name": "last_batch_id", "type": "STRING", "mode": "NULLABLE", "description": "Last batch included in the watermark." },
+    { "name": "updated_by_run_id", "type": "STRING", "mode": "NULLABLE", "description": "Airflow run_id that advanced the watermark." },
+    { "name": "updated_at", "type": "TIMESTAMP", "mode": "REQUIRED", "description": "When the watermark was advanced." }
+  ]
+}
