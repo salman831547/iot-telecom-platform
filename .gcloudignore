@@ -1,0 +1,15 @@
+# Upload only what Cloud Build needs (source tarball for `gcloud builds submit`).
+.git/
+.gitignore
+.venv/
+.venv-*/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+**/.terraform/
+*.tfstate*
+*.tfplan
+output/
+data/
+.claude/

@@ -320,3 +320,90 @@ generation, because the re-run uploaded nothing.
 git add -A && git commit -F <path-to>/commit-msg.txt && git push -u origin feat/phase-d-library
 gh pr create --base main --head feat/phase-d-library --title "<...>" --body-file <path-to>/pr-body.md
 ```
+
+---
+
+## Step 1 · Phase E: ETL DAGs, SQL, local end-to-end run, DAG integrity on Linux
+
+### E.1 Merge Phase D, branch, choose the Airflow version ☁️🔍
+
+```powershell
+gh pr merge 3 --repo salman831547/iot-telecom-platform --squash --delete-branch
+git checkout main; git pull --ff-only; git branch -D feat/phase-d-library
+git checkout -b feat/phase-e-dags
+# Composer 3 images available in the region (the REST API needs no extra gcloud component):
+$tok = gcloud auth print-access-token
+(Invoke-RestMethod -Headers @{Authorization="Bearer $tok"} `
+  "https://composer.googleapis.com/v1/projects/project-2026-ai/locations/us-central1/imageVersions?pageSize=200").imageVersions |
+  Where-Object { $_.imageVersionId -like 'composer-3-*' } | Select-Object imageVersionId, isDefault
+```
+
+Result: `composer-3-airflow-3.3.1-build.5` (chosen), `3.2.2-build.9`, and `2.11.1-build.22` (the default).
+Config `composer.image_version` is pinned to 3.3.1.
+
+> I tried a local Airflow install: `uv pip install apache-airflow==3.3.1 --constraint …constraints-3.11.txt` into
+> `.venv-airflow` installs on Windows, but `airflow.sdk` fails to import (`ObjectStoragePath`), because Airflow doesn't
+> support Windows. I deleted that venv. DAG tests run on Linux in Cloud Build instead (E.5).
+
+### E.2 Quality gates 🔍
+
+```bash
+uv sync                                    # + google-cloud-secret-manager
+uv run ruff format . && uv run ruff check . --output-format concise
+uv run mypy                                # strict, 15 files
+uv run pytest -q                           # 78 passed (DAG integrity tests skip without Airflow)
+```
+
+### E.3 Full ETL chain locally against real GCS and BigQuery (same task functions as the DAGs) ☁️
+
+```bash
+uv run python scripts/run_etl_local.py --start 2026-11-09T03:00:00Z --hours 2   # DAG1 x2 -> DAG2 -> DAG3
+uv run python scripts/run_etl_local.py --skip-ingest                            # DAG2 -> DAG3 only
+```
+
+Bugs found and fixed on the way:
+1. `string.Template` treated the regex anchor `$'` and a `${...}` inside a comment as placeholders. Fixed with a
+   custom `_SqlTemplate` that substitutes only `${identifier}`.
+2. `MERGE ... INSERT ROW` maps columns by position, and the `cleaned` column order differed from the table schema.
+   Fixed with an explicit column list; a unit test now asserts it matches the silver schema.
+
+Result:
+
+| Stage | Numbers |
+|---|---|
+| Silver | rows_in 5,505 · deduplicated 160 · rows_out 5,345 · invalid 349 (6.5%) · rejected 0 |
+| Silver DQ | null keys 0 · duplicate `event_id`s 0 · min rows per batch 714 |
+| Gold | 1,448 device-hour rows · 359 cell-hour rows |
+| Gold DQ | reconciles to silver: 4,996 = 4,996 device events, 4,900 = 4,900 cell events |
+
+### E.4 Prove the properties 🔍
+
+A one-off read-mostly script (not committed) checked:
+- **Duplicates:** the generator injected 160 (summed from the manifests), and silver removed exactly 160.
+- **Incremental:** the watermark advanced, and the next `find_new_files` returned 0.
+- **Retry safety:** a forced re-merge of all 5 files left silver at 5,345 rows (before 5,345, after 5,345).
+- **Cleaning:** canonical values only (6 network types, 6 device types, 5 event types, firmware without the `v` prefix),
+  300 clean device ids, DQ flags (rsrp 111, temperature 97, battery 87, outside_service_area 62), and PII hashed.
+
+### E.5 Cloud Build source bucket + DAG integrity tests on Linux (Airflow 3.3.1) ☁️
+
+The project has **no default Cloud Build service account**. The first submit failed with `Unknown service account`.
+Builds therefore run as the least-privilege `sa-iot-dev-cb-deployer`, with sources in a dedicated foundation bucket.
+
+```bash
+uv run python scripts/tf.py plan foundation -- -out=foundation.tfplan     # Plan: 3 to add, 0 change, 0 destroy
+TF_VAR_env=dev terraform -chdir=infra/terraform/10-foundation apply foundation.tfplan
+```
+
+```powershell
+gcloud builds submit --config cloudbuild/dag-tests.yaml --region us-central1 `
+  --service-account "projects/project-2026-ai/serviceAccounts/sa-iot-dev-cb-deployer@project-2026-ai.iam.gserviceaccount.com" `
+  --gcs-source-staging-dir "gs://project-2026-ai-iot-dev-cloudbuild/source" .
+# Logs are Cloud-Logging-only, so read them by build id:
+gcloud logging read 'resource.type="build" AND resource.labels.build_id="<id>"' --order=asc --format="value(textPayload)"
+```
+
+Iterations:
+1. Airflow 3.3 removed `DagBag(include_examples=...)`. Examples are now disabled via `AIRFLOW__CORE__LOAD_EXAMPLES`.
+2. `NullTimetable` has no `.summary`, so the schedule test now asserts the timetable type.
+3. **11 passed** on Airflow 3.3.1 / Python 3.11 / Linux in 35s.

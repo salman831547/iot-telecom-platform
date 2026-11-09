@@ -1,0 +1,36 @@
+# DAG integrity tests on Linux, against the exact Airflow version Composer runs
+# (config composer.image_version), pinned with Airflow's official constraints file.
+#
+#   gcloud builds submit --config cloudbuild/dag-tests.yaml .
+#
+# No GCP credentials are needed: the tests only parse DAGs (no cloud calls at import time).
+substitutions:
+  _AIRFLOW_VERSION: "3.3.1"
+  _PYTHON_VERSION: "3.11"
+
+steps:
+  - id: dag-integrity
+    name: python:${_PYTHON_VERSION}-slim
+    entrypoint: bash
+    env:
+      - AIRFLOW_HOME=/workspace/.airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__UNIT_TEST_MODE=True
+      - PYTHONPATH=/workspace/src
+      - IOT_ENV=dev
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        pip install --quiet --root-user-action=ignore uv
+        uv pip install --system --quiet \
+          "apache-airflow==${_AIRFLOW_VERSION}" apache-airflow-providers-standard \
+          pytest pydantic pyyaml google-cloud-storage google-cloud-bigquery google-cloud-secret-manager \
+          --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-${_AIRFLOW_VERSION}/constraints-${_PYTHON_VERSION}.txt"
+        airflow version
+        airflow db migrate > /dev/null
+        python -m pytest -q -p no:cacheprovider -o addopts="" tests/dags
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 1200s

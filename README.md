@@ -6,7 +6,8 @@ Production-style, config-driven data platform for telecom IoT telemetry on Googl
 
 | | |
 |---|---|
-| **Status** | Step 1 · Phase D (library and data generator) ✅ |
+| **Status** | Step 1 · Phase E (ETL DAGs and SQL) ✅ |
+| **Orchestrator** | Cloud Composer 3 · Airflow **3.3.1** (`composer-3-airflow-3.3.1-build.5`) |
 | **Cloud** | GCP · `project-2026-ai` · `us-central1` |
 | **Env config** | [`config/envs/dev.yaml`](config/envs/dev.yaml): one file drives Terraform, DAGs and the generator |
 | **Command log** | [`docs/COMMANDS.md`](docs/COMMANDS.md): every command run to build this project |
@@ -73,6 +74,7 @@ Terraform is split into layers with **separate state**, so `terraform destroy` o
 | VPC and subnet | `iot-dev-vpc` / `iot-dev-composer-subnet` (10.10.0.0/24) | Private Google Access, flow logs (10% sampled), explicit deny-all ingress, **no NAT** (no egress) |
 | Staging bucket | `project-2026-ai-iot-dev-staging` | UBLA, public-access prevention, Nearline after 30 days, deleted after 90 days |
 | Composer bucket | `project-2026-ai-iot-dev-composer` | Versioned (last 5 versions kept), reused by every Composer instance |
+| Cloud Build bucket | `project-2026-ai-iot-dev-cloudbuild` | Build source tarballs, deleted after 7 days. CI can write, the deployer can only read |
 | BigQuery `iot_landing` | Transient load tables | Tables expire after 24 hours |
 | BigQuery `iot_silver` | `telemetry` | Partitioned by `event_date`, clustered by `device_id, cell_id`, partition filter required |
 | BigQuery `iot_gold` | `device_hourly_kpis`, `cell_hourly_kpis` | Partitioned by `event_date`, clustered, partition filter required |
@@ -106,6 +108,60 @@ flowchart LR
 ```
 
 Each DAG triggers the next. Every task is **idempotent**: re-running an interval gives the same result. Loads are **incremental** from a watermark, so downtime or a Composer rebuild leaves no gaps.
+
+### The three DAGs
+
+Thin DAG files ([`dags/`](dags/)) wire together task functions from [`iot_pipeline.etl`](src/iot_pipeline/etl/). All logic is plain Python and SQL, so it can be unit-tested and run end to end without Airflow ([`scripts/run_etl_local.py`](scripts/run_etl_local.py)).
+
+```mermaid
+flowchart LR
+  subgraph D1[iot_01_ingest_raw · hourly]
+    A1[generate_and_upload] --> A2[validate_raw_file] --> A3[publish_manifest<br/>commit marker] --> A4[audit] --> A5[trigger_silver]
+  end
+  subgraph D2[iot_02_raw_to_silver · triggered]
+    B1[find_new_files<br/>after watermark] --> B2{has_new_files<br/>short-circuit}
+    B2 --> T1
+    subgraph T[transform]
+      T1[load_landing] --> T2[merge_silver<br/>1 transaction] --> T3[check_silver_quality]
+    end
+    T3 --> B4[audit] --> B5[trigger_gold<br/>conf: dates]
+  end
+  subgraph D3[iot_03_silver_to_gold · triggered]
+    C1[resolve_dates] --> C2[rebuild_gold<br/>1 transaction] --> C3[check_gold_quality<br/>reconcile] --> C4[audit]
+  end
+  A5 -.-> B1
+  B5 -.-> C1
+```
+
+| Airflow / data concept | Where it's used |
+|---|---|
+| **Idempotency** | Deterministic batch → same object path and bytes; MD5-skip upload; `MERGE` on deterministic `event_id`; gold = delete and insert of the affected partitions; deterministic landing table and trigger run ids |
+| **Incremental loading** | Watermark (manifest creation time) in `iot_ops.watermarks`, outside Airflow. It advances in the **same BigQuery transaction** as the merge and never moves backwards. Catch-up after downtime is capped by `max_files_per_run` |
+| **Exactly-once effect under retries** | The file list travels by XCom, so a retried merge re-processes the same files; the result is the same rows |
+| **Commit marker** | The manifest is written only after validation, and silver only reads files that have one |
+| **Cross-DAG dependency** | `TriggerDagRunOperator` (deterministic `trigger_run_id`, `reset_dag_run`), plus Asset outlets for lineage |
+| **Task dependencies** | TaskFlow API, explicit `>>`, `TaskGroup("transform")`, `@task.short_circuit` |
+| **Config-driven defaults** | `default_args` (retries, exponential backoff, `execution_timeout`), `dagrun_timeout`, `max_active_runs=1`, `catchup`, tags: all from YAML |
+| **Data quality** | Measured in SQL, judged in Python against config thresholds; `DataQualityError` gives `DQ_FAILED` in the audit log |
+| **Observability** | Every task outcome goes to `iot_ops.batch_audit` (success via an `audit` task, failure via `on_failure_callback`), plus BigQuery job labels per DAG and task |
+| **Resume after Composer is rebuilt** | `is_paused_upon_creation=False`; state lives in the watermark, the audit table and the buckets, not in the Airflow DB |
+
+**Silver transformations** ([`02_merge_silver.sql`](sql/silver/02_merge_silver.sql)):
+- **Renaming:** `timeStamp`→`event_ts`, `Battery %`→`battery_pct`, `Temp (C)`→`temperature_c`, `Long`→`longitude`, and so on.
+- **Clean-up:**
+  - "no value" tokens become NULL, and unit suffixes are stripped
+  - 3 timestamp formats are parsed
+  - radio-type aliases and device-type spellings are mapped to canonical values
+  - IMEIs keep digits only, and firmware loses its `v` prefix
+- **Data-quality flags:** valid ranges and the service area come from config, which catches swapped lat/long.
+- **PII:** IMSI, MSISDN and IMEI are hashed with a salt, and the IMEI TAC is kept for model analytics.
+- **De-duplication:** done by `event_id`.
+
+**Verified against real BigQuery:**
+- Of 5,505 raw rows, exactly the 160 injected duplicates were removed.
+- 349 rows (6.5%) were flagged invalid.
+- Gold reconciles to silver (4,996 = 4,996 events).
+- A forced re-merge changed nothing, and the next run found 0 new files.
 
 ### Raw data: contract and generator
 
@@ -181,6 +237,7 @@ GitHub settings are also code ([`scripts/github_repo.py`](scripts/github_repo.py
 - **PII** (IMSI, MSISDN) is SHA-256 hashed with a salt from Secret Manager in the silver layer. Raw data expires automatically.
 - **Buckets:** uniform bucket-level access, public-access prevention enforced, versioning on state and DAGs.
 - **Supply chain:** pinned dependencies, Dependabot, CODEOWNERS, `gitleaks`, `trivy`, branch protection.
+- **Known limitation:** the PII salt reaches BigQuery as a query parameter, and parameters are visible in job metadata to principals who can list *all* project jobs (admins). It is never logged, put in XCom or stored in Terraform state. Planned hardening: Cloud KMS keysets with `DETERMINISTIC_ENCRYPT` / AEAD functions.
 - **Not possible yet:** the project has no GCP Organization, so VPC Service Controls and org policies are deferred until it does.
 
 ## Repository layout
@@ -189,15 +246,17 @@ GitHub settings are also code ([`scripts/github_repo.py`](scripts/github_repo.py
 config/envs/          Environment config (single source of truth, validated by pydantic)
 src/iot_pipeline/     Reusable library: config, contracts, schemas, generator, gcs, bq
 schemas/bigquery/     Table definitions as code (<dataset>/<table>.json)
-dags/                 Airflow DAGs (Phase E)
-sql/                  Versioned BigQuery SQL (Phase E)
+dags/                 3 thin Airflow 3 DAGs (+ .airflowignore for the bundled library)
+sql/                  Versioned BigQuery SQL: silver/, gold/ (identifiers templated, values parameterised)
 infra/terraform/      00-bootstrap · 10-foundation · 20-composer · modules (Phases B, C, G)
 scripts/tf.py         Config-driven Terraform wrapper (backend + env injected from YAML)
 scripts/github_repo.py  GitHub variables, environment and branch ruleset as code
 scripts/verify_foundation.py  Read-only smoke test: live resources vs config
-cloudbuild/           Cloud Build configs (Phase F)
+scripts/run_etl_local.py      Run DAG1→DAG2→DAG3 task functions locally against real GCP
+cloudbuild/           Cloud Build configs (dag-tests.yaml: DAG integrity on Linux / Airflow 3.3.1)
 .github/              Workflows, CODEOWNERS, Dependabot, PR template
-tests/                Unit tests (+ DAG integrity tests)
+tests/unit/           78 unit tests (no cloud, no Airflow)
+tests/dags/           DAG integrity tests (real Airflow, Linux via Cloud Build)
 docs/COMMANDS.md      Chronological log of every command run
 ```
 
@@ -220,7 +279,7 @@ uv run python -m iot_pipeline.config validate config/envs/dev.yaml
 - [x] **B.** Terraform bootstrap: remote state, APIs, Workload Identity Federation, CI service accounts
 - [x] **C.** Terraform foundation: buckets, BigQuery, runtime IAM, VPC, secrets
 - [x] **D.** Library: data generator, GCS/BQ helpers
-- [ ] **E.** Three ETL DAGs and SQL
+- [x] **E.** Three ETL DAGs and SQL
 - [ ] **F.** GitHub Actions and Cloud Build pipelines
 - [ ] **G.** Composer layer and an end-to-end run
 - [ ] **H.** Destroy and recreate Composer, then confirm the pipeline resumes
