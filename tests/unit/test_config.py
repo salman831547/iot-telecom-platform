@@ -54,6 +54,19 @@ def test_env_label_must_match_env(dev_raw: dict) -> None:
         parse_config(yaml.safe_dump(dev_raw))
 
 
+@pytest.mark.parametrize("role", ["roles/owner", "roles/editor", "owner"])
+def test_broad_or_malformed_roles_are_rejected(dev_raw: dict, role: str) -> None:
+    dev_raw["iam"]["tf_apply_project_roles"].append(role)
+    with pytest.raises(ValidationError):
+        parse_config(yaml.safe_dump(dev_raw))
+
+
+def test_github_owner_id_must_be_numeric(dev_raw: dict) -> None:
+    dev_raw["github"]["owner_id"] = "salman"
+    with pytest.raises(ValidationError, match="owner_id"):
+        parse_config(yaml.safe_dump(dev_raw))
+
+
 def test_config_is_immutable() -> None:
     cfg = load_config(REPO_CONFIG_DIR / "dev.yaml")
     with pytest.raises(ValidationError):

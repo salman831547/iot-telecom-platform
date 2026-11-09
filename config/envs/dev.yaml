@@ -26,9 +26,13 @@ labels:
   managed-by: terraform
 
 github:
-  owner: salman831547 # TODO(confirm): GitHub user/org that owns the repo
+  owner: salman831547
+  # Immutable numeric owner id (https://api.github.com/users/<owner>). WIF trusts this id,
+  # not just the name, so a deleted-and-recreated account/repo name cannot be hijacked.
+  owner_id: "48931885"
   repo: iot-telecom-platform
   deploy_branch: main
+  environment: dev # GitHub Environment that gates `terraform apply`
 
 terraform:
   state_bucket: project-2026-ai-iot-tfstate
@@ -63,6 +67,33 @@ service_accounts:
 workload_identity:
   pool_id: github-pool
   provider_id: github-oidc
+
+# Least-privilege role sets, applied by 00-bootstrap. Changing access = a reviewed PR.
+iam:
+  tf_plan_project_roles: # read-only: PR plans (run with -lock=false)
+    - roles/viewer
+    - roles/iam.securityReviewer
+  tf_apply_project_roles: # create/modify foundation + composer layers
+    - roles/viewer
+    - roles/storage.admin
+    - roles/bigquery.admin
+    - roles/composer.admin
+    - roles/compute.networkAdmin
+    - roles/secretmanager.admin
+    - roles/iam.serviceAccountAdmin
+    - roles/cloudbuild.builds.editor
+    - roles/logging.viewer
+    - roles/serviceusage.serviceUsageConsumer
+  # tf_apply gets projectIamAdmin ONLY for these roles (IAM condition), so it can never
+  # grant itself or anyone else Owner/Editor.
+  tf_apply_grantable_roles:
+    - roles/composer.worker
+    - roles/composer.ServiceAgentV2Ext
+    - roles/bigquery.jobUser
+    - roles/logging.logWriter
+    - roles/monitoring.metricWriter
+  cloudbuild_deployer_project_roles:
+    - roles/logging.logWriter
 
 network:
   vpc_name: iot-dev-vpc
@@ -131,12 +162,12 @@ pipeline:
   max_active_runs: 1
   tags: [iot, telecom]
   default_task:
-    retries: 3
-    retry_delay_seconds: 60
+    retries: 1
+    retry_delay_seconds: 10
     retry_exponential_backoff: true
-    max_retry_delay_seconds: 600
-    execution_timeout_minutes: 30
-  dagrun_timeout_minutes: 60
+    max_retry_delay_seconds: 10
+    execution_timeout_minutes: 1
+  dagrun_timeout_minutes: 5
   dags:
     ingest: iot_01_ingest_raw
     silver: iot_02_raw_to_silver
