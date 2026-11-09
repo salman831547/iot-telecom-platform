@@ -1,0 +1,30 @@
+{
+  "description": "Transient, schema-on-read landing table: raw CSV columns loaded as STRING (sanitised names, contract v1.0), so messy values never fail the load. Created per run by DAG 2; not managed by Terraform.",
+  "partitioning": null,
+  "require_partition_filter": false,
+  "clustering": [],
+  "schema": [
+    { "name": "device_id", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'Device ID'." },
+    { "name": "imei", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'IMEI' (may contain dashes)." },
+    { "name": "imsi", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'IMSI' (PII)." },
+    { "name": "msisdn", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'MSISDN' (PII)." },
+    { "name": "time_stamp", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'timeStamp': ISO-8601, epoch-ms or 'YYYY-MM-DD HH:MM:SS'." },
+    { "name": "mcc", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'MCC'." },
+    { "name": "mnc", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'MNC'." },
+    { "name": "tac", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'TAC'." },
+    { "name": "cell_id", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'Cell ID'." },
+    { "name": "network_type", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'Network Type' (inconsistent casing and aliases)." },
+    { "name": "rsrp", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'RSRP' (may carry ' dBm' suffix)." },
+    { "name": "rsrq", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'RSRQ' (may carry ' dB' suffix)." },
+    { "name": "sinr", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'SINR' (may carry ' dB' suffix)." },
+    { "name": "battery", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'Battery %' (may carry '%' suffix)." },
+    { "name": "temp_c", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'Temp (C)' (may carry 'C' suffix)." },
+    { "name": "bytes_up", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'Bytes Up'." },
+    { "name": "bytes_down", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'Bytes Down'." },
+    { "name": "lat", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'Lat'." },
+    { "name": "long", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'Long'." },
+    { "name": "fw_version", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'FW Version' (with or without leading 'v')." },
+    { "name": "device_type", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'Device Type' (inconsistent casing and separators)." },
+    { "name": "event", "type": "STRING", "mode": "NULLABLE", "description": "Raw 'Event' (inconsistent casing)." }
+  ]
+}

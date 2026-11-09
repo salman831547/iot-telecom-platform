@@ -72,3 +72,9 @@ strict = true
 plugins = ["pydantic.mypy"]
 mypy_path = "src"
 packages = ["iot_pipeline"]
+
+# google-cloud-storage ships no type information (no py.typed marker).
+[[tool.mypy.overrides]]
+module = ["google.cloud.storage", "google.cloud.storage.*"]
+ignore_missing_imports = true
+follow_imports = "skip"

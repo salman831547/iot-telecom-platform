@@ -6,7 +6,7 @@ Production-style, config-driven data platform for telecom IoT telemetry on Googl
 
 | | |
 |---|---|
-| **Status** | Step 1 · Phase C (foundation layer) ✅ |
+| **Status** | Step 1 · Phase D (library and data generator) ✅ |
 | **Cloud** | GCP · `project-2026-ai` · `us-central1` |
 | **Env config** | [`config/envs/dev.yaml`](config/envs/dev.yaml): one file drives Terraform, DAGs and the generator |
 | **Command log** | [`docs/COMMANDS.md`](docs/COMMANDS.md): every command run to build this project |
@@ -107,6 +107,32 @@ flowchart LR
 
 Each DAG triggers the next. Every task is **idempotent**: re-running an interval gives the same result. Loads are **incremental** from a watermark, so downtime or a Composer rebuild leaves no gaps.
 
+### Raw data: contract and generator
+
+[`iot_pipeline.contracts`](src/iot_pipeline/contracts.py) is the source contract (v1.0): 22 messy raw headers, plus the sanitised all-STRING landing columns they map to. The generator, the landing schema file and the tests all import it, so they can't drift apart.
+
+[`iot_pipeline.generator`](src/iot_pipeline/generator.py) produces one hourly batch per data interval (500–2,000 rows × 22 columns, from config).
+
+| Aspect | What it does |
+|---|---|
+| **Realistic** | A stable 300-device fleet across 6 device types, with Luhn-valid IMEIs, IMSIs that start with MCC 310 + MNC 260/410, and US MSISDNs. LTE cells (ECI = eNB×256+sector) are grouped into tracking areas around 6 US metros. RSRP, RSRQ and SINR stay in physical ranges, battery drains over time, traffic depends on device type, and trackers roam between cells |
+| **Messy on purpose** | Mixed header styles, 3 timestamp formats (ISO, epoch-ms, `YYYY-MM-DD HH:MM:SS`), unit suffixes (`-97 dBm`, `77%`, `31C`), null tokens (`N/A`, `null`, `NaN`, `-`, empty), aliases and casing (`LTE`/` lte `/`4g`, `SMART-METER`/`Smart Meter`), IMEIs with dashes, `v`-prefixed firmware, out-of-range values (battery 140%, RSRP +20, swapped lat/long), and ~3% exact duplicate rows |
+| **Deterministic** | Seeded from `(env, interval)`, so a re-run produces byte-identical content at the same path `raw/iot_telemetry/dt=YYYY-MM-DD/hour=HH/part-<batch>.csv` |
+| **Re-runs are no-ops** | Upload is skipped when the MD5 matches, so a re-run creates no new object |
+| **Auditable** | One manifest per batch records the row count, MD5, header and how many anomalies of each kind were injected, so silver's cleaning can be checked against it |
+| **Portable** | Standard library only, so it runs inside private Composer |
+
+```bash
+uv run python -m iot_pipeline.generator --start 2026-11-09T00:00:00Z --hours 3 --out ./output   # local
+uv run python -m iot_pipeline.generator --start 2026-11-09T00:00:00Z --hours 3 --upload         # staging bucket
+```
+
+The helpers in [`gcs.py`](src/iot_pipeline/gcs.py) and [`bq.py`](src/iot_pipeline/bq.py) take clients as arguments, so the same code runs from the CLI, from Airflow hooks and from tests with fakes:
+- MD5-aware upload
+- typed BigQuery query parameters, so values are never formatted into SQL
+- job labels for cost attribution
+- a parameterised audit-log writer
+
 ## CI/CD identity model
 
 ```mermaid
@@ -161,7 +187,7 @@ GitHub settings are also code ([`scripts/github_repo.py`](scripts/github_repo.py
 
 ```
 config/envs/          Environment config (single source of truth, validated by pydantic)
-src/iot_pipeline/     Reusable library: config loader, table schemas, generator, GCS/BQ helpers
+src/iot_pipeline/     Reusable library: config, contracts, schemas, generator, gcs, bq
 schemas/bigquery/     Table definitions as code (<dataset>/<table>.json)
 dags/                 Airflow DAGs (Phase E)
 sql/                  Versioned BigQuery SQL (Phase E)
@@ -193,7 +219,7 @@ uv run python -m iot_pipeline.config validate config/envs/dev.yaml
 - [x] **A.** Repo foundation: config schema, tooling, governance
 - [x] **B.** Terraform bootstrap: remote state, APIs, Workload Identity Federation, CI service accounts
 - [x] **C.** Terraform foundation: buckets, BigQuery, runtime IAM, VPC, secrets
-- [ ] **D.** Library: data generator, GCS/BQ helpers
+- [x] **D.** Library: data generator, GCS/BQ helpers
 - [ ] **E.** Three ETL DAGs and SQL
 - [ ] **F.** GitHub Actions and Cloud Build pipelines
 - [ ] **G.** Composer layer and an end-to-end run
