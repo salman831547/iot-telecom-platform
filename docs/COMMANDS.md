@@ -265,3 +265,58 @@ terraform -chdir=infra/terraform/10-foundation providers lock \
 git add -A && git commit -F <path-to>/commit-msg.txt && git push -u origin feat/phase-c-foundation
 gh pr create --base main --head feat/phase-c-foundation --title "<...>" --body-file <path-to>/pr-body.md
 ```
+
+---
+
+## Step 1 · Phase D: Library (raw contract, data generator, GCS/BigQuery helpers)
+
+### D.1 Merge Phase C and branch ☁️
+
+```powershell
+gh pr merge 2 --repo salman831547/iot-telecom-platform --squash --delete-branch
+git checkout main; git pull --ff-only; git branch -D feat/phase-c-foundation
+git checkout -b feat/phase-d-library
+```
+
+### D.2 Inspect the raw contract 🔍
+
+```powershell
+uv run python -c "from iot_pipeline.contracts import LANDING_COLUMNS as L; print(len(L)); print(L)"   # 22 columns
+```
+
+### D.3 Quality gates 🔍
+
+```bash
+uv run ruff format . && uv run ruff check . --output-format concise
+uv run mypy                       # strict; google-cloud-storage is untyped -> override in pyproject
+uv run pytest -q                  # 64 passed, 94% coverage
+```
+
+Fixes made along the way:
+- Python's built-in `hash()` is salted per process, which broke determinism, so a stable cell assignment from the device id is used instead.
+- `from google.cloud import storage` became `import google.cloud.storage as storage` so mypy resolves it.
+
+### D.4 Generate locally (no cloud) 🛠️
+
+```bash
+uv run python -m iot_pipeline.generator --start 2026-11-09T00:00:00Z --hours 3 --out ./output   # git-ignored
+```
+
+### D.5 Generate into the staging bucket and prove the re-run writes nothing ☁️
+
+```bash
+uv run python -m iot_pipeline.generator --start 2026-11-09T00:00:00Z --hours 3 --upload   # [uploaded] x3
+uv run python -m iot_pipeline.generator --start 2026-11-09T00:00:00Z --hours 3 --upload   # [unchanged (idempotent skip)] x3
+```
+
+Result: 3 CSVs (735, 1,044 and 1,403 rows × 22 columns) under
+`gs://project-2026-ai-iot-dev-staging/raw/iot_telemetry/dt=2026-11-09/hour=HH/`, plus one manifest per batch
+under `manifests/iot_telemetry/...` with the row count, MD5 and counts of injected anomalies. Each object has a single
+generation, because the re-run uploaded nothing.
+
+### D.6 Commit and PR ☁️
+
+```bash
+git add -A && git commit -F <path-to>/commit-msg.txt && git push -u origin feat/phase-d-library
+gh pr create --base main --head feat/phase-d-library --title "<...>" --body-file <path-to>/pr-body.md
+```
