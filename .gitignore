@@ -1,0 +1,55 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.python-cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+
+# ---------- Terraform ----------
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+tfplan*
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+# Generated per-layer backend config (rendered from config/envs/*.yaml)
+**/backend.auto.hcl
+# Keep the provider lock file (.terraform.lock.hcl) committed for reproducible builds.
+
+# ---------- Secrets / credentials (never commit) ----------
+*.pem
+*.key
+*credentials*.json
+*service-account*.json
+.env
+.env.*
+!.env.example
+
+# ---------- Generated data ----------
+/output/
+/data/
+*.csv
+!tests/fixtures/**/*.csv
+
+# ---------- Editors / OS ----------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---------- Local agent settings ----------
+.claude/settings.local.json

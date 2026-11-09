@@ -1,0 +1,9 @@
+# Every change needs review from the platform owner.
+# TODO(confirm): replace with your GitHub user or team.
+*                    @salman831547
+
+# Infra and CI/CD are high-blast-radius: always require owner review.
+/infra/              @salman831547
+/.github/            @salman831547
+/cloudbuild/         @salman831547
+/config/envs/        @salman831547

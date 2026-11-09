@@ -1,0 +1,171 @@
+# =============================================================================
+# Single source of truth for the `dev` environment.
+#
+# Consumed by:
+#   - Terraform      -> yamldecode(file("config/envs/<env>.yaml"))
+#   - Airflow DAGs   -> iot_pipeline.config.load_config()   (deployed to Composer bucket)
+#   - Data generator -> iot_pipeline.config.load_config()
+#
+# Rules:
+#   - NO secrets here. Secrets live in Secret Manager; only their IDs are referenced.
+#   - Resource names are explicit (not derived) so Terraform and Python can never drift.
+#   - Every key is validated by the pydantic schema in src/iot_pipeline/config.py
+#     (unknown keys fail CI -> typos are caught before deploy).
+# =============================================================================
+env: dev
+
+project:
+  id: project-2026-ai
+  region: us-central1
+
+labels:
+  app: iot-telecom
+  env: dev
+  owner: data-platform
+  cost-center: rnd
+  managed-by: terraform
+
+github:
+  owner: salman831547 # TODO(confirm): GitHub user/org that owns the repo
+  repo: iot-telecom-platform
+  deploy_branch: main
+
+terraform:
+  state_bucket: project-2026-ai-iot-tfstate
+  state_prefixes:
+    bootstrap: bootstrap
+    foundation: foundation/dev
+    composer: composer/dev
+
+# APIs enabled by the 00-bootstrap layer (nothing is enabled by hand).
+apis:
+  - artifactregistry.googleapis.com
+  - bigquery.googleapis.com
+  - cloudbuild.googleapis.com
+  - cloudresourcemanager.googleapis.com
+  - composer.googleapis.com
+  - compute.googleapis.com
+  - iam.googleapis.com
+  - iamcredentials.googleapis.com
+  - logging.googleapis.com
+  - monitoring.googleapis.com
+  - secretmanager.googleapis.com
+  - serviceusage.googleapis.com
+  - storage.googleapis.com
+  - sts.googleapis.com
+
+service_accounts:
+  tf_plan: sa-iot-dev-tf-plan # GitHub Actions, PRs (read-only)
+  tf_apply: sa-iot-dev-tf-apply # GitHub Actions, main branch + approval
+  cloudbuild_deployer: sa-iot-dev-cb-deployer # Cloud Build, DAG sync only
+  composer_runtime: sa-iot-dev-composer # Airflow workers / scheduler
+
+workload_identity:
+  pool_id: github-pool
+  provider_id: github-oidc
+
+network:
+  vpc_name: iot-dev-vpc
+  subnet_name: iot-dev-composer-subnet
+  subnet_cidr: 10.10.0.0/24
+
+storage:
+  location: US-CENTRAL1
+  staging_bucket:
+    name: project-2026-ai-iot-dev-staging
+    versioning: false
+    nearline_after_days: 30
+    delete_after_days: 90
+  composer_bucket:
+    name: project-2026-ai-iot-dev-composer
+    versioning: true
+    noncurrent_versions_to_keep: 5
+
+bigquery:
+  location: us-central1
+  datasets:
+    landing:
+      id: iot_landing # transient all-STRING load tables
+      default_table_expiration_hours: 24
+    silver:
+      id: iot_silver
+      default_partition_expiration_days: 365
+    gold:
+      id: iot_gold
+      default_partition_expiration_days: 730
+    ops:
+      id: iot_ops # watermarks, audit log (pipeline state survives Composer)
+      default_partition_expiration_days: 365
+
+secrets:
+  pii_hash_salt: iot-dev-pii-hash-salt # Secret Manager secret ID (value never in git)
+
+composer:
+  environment_name: iot-dev-composer
+  image_version: composer-3-airflow-2.10.5 # TODO(verify in Phase G): latest GA image in region
+  environment_size: ENVIRONMENT_SIZE_SMALL
+  private_environment: true
+  resilience_mode: STANDARD_RESILIENCE
+  workloads:
+    scheduler: { cpu: 0.5, memory_gb: 2, storage_gb: 1, count: 1 }
+    web_server: { cpu: 0.5, memory_gb: 2, storage_gb: 1 }
+    triggerer: { cpu: 0.5, memory_gb: 1, count: 1 }
+    worker: { cpu: 0.5, memory_gb: 2, storage_gb: 1, min_count: 1, max_count: 3 }
+  airflow_config_overrides:
+    core-dags_are_paused_at_creation: "True"
+    core-max_active_runs_per_dag: "1"
+    scheduler-dag_dir_list_interval: "60"
+    secrets-backend: airflow.providers.google.cloud.secrets.secret_manager.CloudSecretManagerBackend
+    secrets-backend_kwargs: '{"variables_prefix": "airflow-variables", "connections_prefix": "airflow-connections", "sep": "-"}'
+  env_variables:
+    IOT_ENV: dev
+  snapshot:
+    save_before_destroy: false
+
+pipeline:
+  owner: data-platform
+  timezone: UTC
+  start_date: "2026-11-09T00:00:00+00:00"
+  schedule: "@hourly"
+  catchup: false
+  max_active_runs: 1
+  tags: [iot, telecom]
+  default_task:
+    retries: 3
+    retry_delay_seconds: 60
+    retry_exponential_backoff: true
+    max_retry_delay_seconds: 600
+    execution_timeout_minutes: 30
+  dagrun_timeout_minutes: 60
+  dags:
+    ingest: iot_01_ingest_raw
+    silver: iot_02_raw_to_silver
+    gold: iot_03_silver_to_gold
+  raw:
+    prefix: raw/iot_telemetry # gs://<staging>/raw/iot_telemetry/dt=YYYY-MM-DD/hour=HH/
+    manifest_prefix: manifests/iot_telemetry
+    file_format: csv
+  tables:
+    landing_raw: raw_telemetry
+    silver_telemetry: telemetry
+    gold_device_hourly: device_hourly_kpis
+    gold_cell_hourly: cell_hourly_kpis
+    ops_watermarks: watermarks
+    ops_audit: batch_audit
+  data_quality:
+    min_rows_per_batch: 100
+    max_invalid_ratio: 0.20
+
+generator:
+  seed_strategy: logical_date # deterministic per interval -> idempotent re-runs
+  rows_per_batch: { min: 500, max: 2000 }
+  device_count: 300
+  anomalies:
+    duplicate_ratio: 0.03
+    null_ratio: 0.02
+    out_of_range_ratio: 0.02
+    unit_suffix_ratio: 0.30
+    epoch_timestamp_ratio: 0.25
+  network:
+    mcc: "310"
+    mnc: ["260", "410"]

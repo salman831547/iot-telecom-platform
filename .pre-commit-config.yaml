@@ -1,0 +1,51 @@
+# Local quality gates. The same checks run again in GitHub Actions CI, so
+# skipping hooks locally (--no-verify) never gets code past the pipeline.
+# Install once:  uv run pre-commit install
+# Run on all:    uv run pre-commit run --all-files
+default_install_hook_types: [pre-commit]
+fail_fast: false
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: [--branch, main]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.4
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.109.4
+    hooks:
+      - id: terraform_fmt
+
+  - repo: local
+    hooks:
+      - id: validate-env-config
+        name: validate env config (pydantic schema)
+        entry: uv run python -m iot_pipeline.config validate
+        language: system
+        files: ^config/envs/.*\.ya?ml$
+        pass_filenames: true
