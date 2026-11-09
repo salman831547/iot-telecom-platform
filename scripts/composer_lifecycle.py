@@ -205,7 +205,7 @@ def _tf(cfg: EnvConfig, action: str) -> None:
         "--env",
         cfg.env,
     ]
-    cmd += ["--", "-auto-approve", "-input=false"]
+    cmd += ["--", "-auto-approve", "-input=false", "-no-color"]
     log(" ".join(["tf.py", action, "composer"]))
     subprocess.run(cmd, check=True, cwd=REPO_ROOT)  # noqa: S603
 

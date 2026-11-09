@@ -80,3 +80,8 @@ packages = ["iot_pipeline"]
 module = ["google.cloud.storage", "google.cloud.storage.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
+
+# Airflow is only present on Composer / the Linux DAG-test build, never in the local venv.
+[[tool.mypy.overrides]]
+module = ["airflow", "airflow.*"]
+ignore_missing_imports = true

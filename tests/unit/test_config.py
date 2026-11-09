@@ -48,6 +48,12 @@ def test_worker_min_greater_than_max_is_rejected(dev_raw: dict) -> None:
         parse_config(yaml.safe_dump(dev_raw))
 
 
+def test_composer3_triggerer_minimum(dev_raw: dict) -> None:
+    dev_raw["composer"]["workloads"]["triggerer"]["memory_gb"] = 1
+    with pytest.raises(ValidationError, match="triggerer"):
+        parse_config(yaml.safe_dump(dev_raw))
+
+
 def test_env_label_must_match_env(dev_raw: dict) -> None:
     dev_raw["labels"]["env"] = "prod"
     with pytest.raises(ValidationError, match=r"labels\.env"):

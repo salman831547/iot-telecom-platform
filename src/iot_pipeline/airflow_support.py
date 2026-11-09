@@ -67,6 +67,21 @@ def default_args(cfg: EnvConfig, dag_key: str) -> dict[str, Any]:
     }
 
 
+def ingest_schedule(cfg: EnvConfig) -> Any:
+    """Timetable for the ingest DAG, or None (on-demand: runs are triggered).
+
+    Airflow 3 turns a plain cron string such as "@hourly" into ``CronTriggerTimetable``,
+    which gives scheduled runs a ZERO-length data interval (start == end). The ingest
+    tasks need the real hour they cover, so a cron schedule is wrapped in
+    ``CronDataIntervalTimetable``: the run at 08:00 processes [07:00, 08:00).
+    """
+    if cfg.pipeline.schedule is None:
+        return None
+    from airflow.timetables.interval import CronDataIntervalTimetable
+
+    return CronDataIntervalTimetable(cfg.pipeline.schedule, timezone=cfg.pipeline.timezone)
+
+
 def dag_kwargs(cfg: EnvConfig, dag_key: str, *, doc_md: str | None) -> dict[str, Any]:
     """Keyword arguments for ``DAG(...)``, all from config. ``schedule`` is passed
     explicitly at each DAG so it is visible where the DAG is defined."""
@@ -75,7 +90,7 @@ def dag_kwargs(cfg: EnvConfig, dag_key: str, *, doc_md: str | None) -> dict[str,
         "dag_id": getattr(p.dags, dag_key),
         "start_date": p.start_date,
         "catchup": p.catchup,
-        "max_active_runs": p.max_active_runs,
+        "max_active_runs": getattr(p.max_active_runs, dag_key),
         "dagrun_timeout": timedelta(minutes=p.dagrun_timeout_minutes),
         "default_args": default_args(cfg, dag_key),
         "tags": [*p.tags, cfg.env, LAYER_BY_DAG_KEY[dag_key]],

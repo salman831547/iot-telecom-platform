@@ -1,7 +1,8 @@
 """
 ### DAG 2: raw (GCS) → silver (BigQuery), incremental
 
-**Triggered by** DAG 1. `max_active_runs=1` serialises merges.
+**Triggered by** DAG 1. `max_active_runs.silver=1` serialises merges: parallel ingest runs
+queue here, and the first run merges every new file.
 
 | Task | What it does |
 |---|---|

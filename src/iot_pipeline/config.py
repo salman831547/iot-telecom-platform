@@ -246,6 +246,13 @@ class ComposerWorkloads(_Strict):
     triggerer: WorkloadSpec
     worker: WorkerSpec
 
+    @model_validator(mode="after")
+    def _composer3_minimums(self) -> ComposerWorkloads:
+        # Enforced by the Composer API at create time; fail at config validation instead.
+        if self.triggerer.memory_gb < 2:
+            raise ValueError("triggerer.memory_gb must be >= 2 (Composer 3 / Airflow 3 minimum)")
+        return self
+
 
 class LifecycleConfig(_Strict):
     max_catchup_hours: Annotated[int, Field(ge=1, le=48)]
@@ -278,6 +285,12 @@ class ComposerConfig(_Strict):
 # --------------------------------------------------------------------------- #
 # Pipeline / generator sections
 # --------------------------------------------------------------------------- #
+class MaxActiveRuns(_Strict):
+    ingest: PositiveInt
+    silver: Annotated[int, Field(ge=1, le=1)]  # watermark MERGE must not run concurrently
+    gold: Annotated[int, Field(ge=1, le=1)]  # partition rebuilds must not overlap
+
+
 class DefaultTaskConfig(_Strict):
     retries: Annotated[int, Field(ge=0, le=10)]
     retry_delay_seconds: PositiveInt
@@ -374,9 +387,9 @@ class PipelineConfig(_Strict):
     owner: str
     timezone: str = "UTC"
     start_date: datetime
-    schedule: str
+    schedule: str | None = None  # None = triggered only (ephemeral Composer)
     catchup: bool = False
-    max_active_runs: PositiveInt = 1
+    max_active_runs: MaxActiveRuns
     tags: list[str] = Field(default_factory=list)
     default_task: DefaultTaskConfig
     dagrun_timeout_minutes: PositiveInt

@@ -1,8 +1,9 @@
 """
 ### DAG 1: ingest raw IoT telemetry → GCS staging
 
-**Schedule:** from config (`pipeline.schedule`, hourly). One run produces the batch for one
-data interval.
+**Schedule:** from config (`pipeline.schedule`). `null` means on-demand: the ephemeral-Composer
+lifecycle script triggers one run per missing hour, in parallel (`max_active_runs.ingest`).
+One run produces the batch for one data interval.
 
 | Task | What it does |
 |---|---|
@@ -20,14 +21,14 @@ from __future__ import annotations
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sdk import DAG, Asset, get_current_context, task
 
-from iot_pipeline.airflow_support import ASSET_NAMES, dag_kwargs, run_context
+from iot_pipeline.airflow_support import ASSET_NAMES, dag_kwargs, ingest_schedule, run_context
 from iot_pipeline.config import load_config
 from iot_pipeline.etl import ingest
 
 CFG = load_config()
 DAG_KEY = "ingest"
 
-with DAG(schedule=CFG.pipeline.schedule, **dag_kwargs(CFG, DAG_KEY, doc_md=__doc__)):
+with DAG(schedule=ingest_schedule(CFG), **dag_kwargs(CFG, DAG_KEY, doc_md=__doc__)):
 
     @task
     def generate_and_upload() -> dict:
