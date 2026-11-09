@@ -105,3 +105,11 @@ resource "google_storage_bucket_iam_member" "cloudbuild_sources_ci_write" {
   role   = "roles/storage.objectCreator"
   member = "serviceAccount:${local.sa_email.tf_apply}"
 }
+
+# Composer service agent manages the environment's folders in OUR bucket
+# (custom storage_config.bucket). Bucket-scoped, not project-wide.
+resource "google_storage_bucket_iam_member" "composer_agent_bucket" {
+  bucket = google_storage_bucket.composer.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${local.composer_service_agent}"
+}

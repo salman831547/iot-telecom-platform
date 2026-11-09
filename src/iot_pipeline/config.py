@@ -246,9 +246,20 @@ class ComposerWorkloads(_Strict):
     triggerer: WorkloadSpec
     worker: WorkerSpec
 
+    @model_validator(mode="after")
+    def _composer3_minimums(self) -> ComposerWorkloads:
+        # Enforced by the Composer API at create time; fail at config validation instead.
+        if self.triggerer.memory_gb < 2:
+            raise ValueError("triggerer.memory_gb must be >= 2 (Composer 3 / Airflow 3 minimum)")
+        return self
 
-class SnapshotConfig(_Strict):
-    save_before_destroy: bool = False
+
+class LifecycleConfig(_Strict):
+    max_catchup_hours: Annotated[int, Field(ge=1, le=48)]
+    run_timeout_minutes: PositiveInt
+    poll_seconds: Annotated[int, Field(ge=5, le=300)]
+    quiet_polls: Annotated[int, Field(ge=1, le=10)]
+    destroy_on_failure: bool = True
 
 
 class ComposerConfig(_Strict):
@@ -256,11 +267,12 @@ class ComposerConfig(_Strict):
     image_version: str
     environment_size: str
     private_environment: bool = True
+    attach_vpc: bool = False
     resilience_mode: str = "STANDARD_RESILIENCE"
     workloads: ComposerWorkloads
     airflow_config_overrides: dict[str, str] = Field(default_factory=dict)
     env_variables: dict[str, str] = Field(default_factory=dict)
-    snapshot: SnapshotConfig = SnapshotConfig()
+    lifecycle: LifecycleConfig
 
     @field_validator("image_version")
     @classmethod
@@ -273,6 +285,12 @@ class ComposerConfig(_Strict):
 # --------------------------------------------------------------------------- #
 # Pipeline / generator sections
 # --------------------------------------------------------------------------- #
+class MaxActiveRuns(_Strict):
+    ingest: PositiveInt
+    silver: Annotated[int, Field(ge=1, le=1)]  # watermark MERGE must not run concurrently
+    gold: Annotated[int, Field(ge=1, le=1)]  # partition rebuilds must not overlap
+
+
 class DefaultTaskConfig(_Strict):
     retries: Annotated[int, Field(ge=0, le=10)]
     retry_delay_seconds: PositiveInt
@@ -369,9 +387,9 @@ class PipelineConfig(_Strict):
     owner: str
     timezone: str = "UTC"
     start_date: datetime
-    schedule: str
+    schedule: str | None = None  # None = triggered only (ephemeral Composer)
     catchup: bool = False
-    max_active_runs: PositiveInt = 1
+    max_active_runs: MaxActiveRuns
     tags: list[str] = Field(default_factory=list)
     default_task: DefaultTaskConfig
     dagrun_timeout_minutes: PositiveInt

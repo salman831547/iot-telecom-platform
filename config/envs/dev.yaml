@@ -138,39 +138,50 @@ composer:
   environment_name: iot-dev-composer
   image_version: composer-3-airflow-3.3.1-build.5 # latest Composer 3 image in us-central1 (2026-10-27)
   environment_size: ENVIRONMENT_SIZE_SMALL
-  private_environment: true
+  private_environment: true # no public IPs, no internet egress (library is stdlib + preinstalled pkgs)
+  # Attach workloads to our VPC (network.*). Off: nothing in the VPC needs reaching yet, and it adds
+  # Composer service-agent network permissions. Composer 3 is private either way.
+  attach_vpc: false
   resilience_mode: STANDARD_RESILIENCE
   workloads:
     scheduler: { cpu: 0.5, memory_gb: 2, storage_gb: 1, count: 1 }
     web_server: { cpu: 0.5, memory_gb: 2, storage_gb: 1 }
-    triggerer: { cpu: 0.5, memory_gb: 1, count: 1 }
+    triggerer: { cpu: 0.5, memory_gb: 2, count: 1 } # Composer 3 + Airflow 3 minimum is 2 GB
     worker: { cpu: 0.5, memory_gb: 2, storage_gb: 1, min_count: 1, max_count: 3 }
   airflow_config_overrides:
     core-dags_are_paused_at_creation: "True"
     core-max_active_runs_per_dag: "1"
-    scheduler-dag_dir_list_interval: "60"
-    secrets-backend: airflow.providers.google.cloud.secrets.secret_manager.CloudSecretManagerBackend
-    secrets-backend_kwargs: '{"variables_prefix": "airflow-variables", "connections_prefix": "airflow-connections", "sep": "-"}'
+    dag_processor-refresh_interval: "60" # Airflow 3 name of scheduler.dag_dir_list_interval
   env_variables:
     IOT_ENV: dev
-  snapshot:
-    save_before_destroy: false
+  # Ephemeral operation (scripts/composer_lifecycle.py cycle): create -> deploy -> run -> destroy.
+  lifecycle:
+    max_catchup_hours: 6 # hours of missed ingestion to process per cycle (bounds cost/time)
+    run_timeout_minutes: 60 # give up waiting for the DAG chain after this
+    poll_seconds: 30
+    quiet_polls: 2 # consecutive polls with no active DAG runs before the chain counts as finished
+    destroy_on_failure: true # never leave a paid environment running after a failed cycle
 
 pipeline:
   owner: data-platform
   timezone: UTC
   start_date: "2026-11-09T00:00:00+00:00"
-  schedule: "@hourly"
+  # null = on-demand: scripts/composer_lifecycle.py triggers every DAG 1 run (ephemeral
+  # Composer). Set "@hourly" for an always-on environment where Airflow schedules itself.
+  schedule: null
   catchup: false
-  max_active_runs: 1
+  max_active_runs: # per DAG
+    ingest: 4 # hours are independent (own file each) -> run catch-up hours in parallel
+    silver: 1 # serialised: concurrent MERGEs would race on the watermark
+    gold: 1 # serialised: concurrent rebuilds of the same partition would conflict
   tags: [iot, telecom]
   default_task:
     retries: 1
     retry_delay_seconds: 10
     retry_exponential_backoff: true
-    max_retry_delay_seconds: 10
-    execution_timeout_minutes: 1
-  dagrun_timeout_minutes: 5
+    max_retry_delay_seconds: 60
+    execution_timeout_minutes: 10
+  dagrun_timeout_minutes: 10
   dags:
     ingest: iot_01_ingest_raw
     silver: iot_02_raw_to_silver

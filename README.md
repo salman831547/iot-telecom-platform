@@ -49,6 +49,33 @@ flowchart LR
   AF <--> OPS
 ```
 
+### Ephemeral Composer: create → run → destroy, on demand
+
+Composer is by far the platform's largest cost, so it only exists while there is work. [`scripts/composer_lifecycle.py`](scripts/composer_lifecycle.py):
+
+```bash
+uv run python scripts/composer_lifecycle.py cycle    # create -> deploy -> run DAG chain -> destroy
+uv run python scripts/composer_lifecycle.py status   # environment state, last raw batch, silver watermark
+uv run python scripts/composer_lifecycle.py plan     # read-only: hours to ingest + deploy diff
+```
+
+```mermaid
+flowchart LR
+  U[up<br/>terraform apply 20-composer] --> D[deploy<br/>md5-diff sync to our bucket]
+  D --> W[wait for DAG parsing<br/>fail fast on import errors]
+  W --> P[plan hours<br/>after last published manifest,<br/>capped by max_catchup_hours]
+  P --> T[trigger iot_01 per hour<br/>exact data interval]
+  T --> Q{all planned runs terminal<br/>AND no active run in any DAG<br/>for N polls?}
+  Q -- no --> Q
+  Q -- yes --> R[report<br/>run states + missing batches]
+  R --> X[down<br/>terraform destroy 20-composer]
+```
+
+- **Knowing when the last job has finished.** Triggers are fire-and-forget, but every downstream run is created *before* its upstream run ends. So once every planned ingest interval is terminal and no run is active in any of the 3 DAGs for `quiet_polls` consecutive polls, the chain is done.
+- **Always torn down.** `down` runs in a `finally` block, so a failed cycle never leaves a billed environment behind (`destroy_on_failure`, or `--keep` to debug).
+- **Resumes after recreation.** Missing hours are derived from the published manifests in GCS, silver uses the watermark in BigQuery, and DAGs are created unpaused.
+- **Settings live in config:** `composer.lifecycle`, covering catch-up cap, run timeout, poll interval, quiet polls and destroy-on-failure.
+
 ### Why Composer can be deleted and recreated safely
 
 | State | Lives in | Survives destroying Composer? |
@@ -281,5 +308,5 @@ uv run python -m iot_pipeline.config validate config/envs/dev.yaml
 - [x] **D.** Library: data generator, GCS/BQ helpers
 - [x] **E.** Three ETL DAGs and SQL
 - [ ] **F.** GitHub Actions and Cloud Build pipelines
-- [ ] **G.** Composer layer and an end-to-end run
+- [~] **G.** Composer layer and the ephemeral lifecycle script (code ready; live cycle pending)
 - [ ] **H.** Destroy and recreate Composer, then confirm the pipeline resumes

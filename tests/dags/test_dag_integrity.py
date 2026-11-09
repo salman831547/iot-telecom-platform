@@ -53,7 +53,8 @@ def test_dag_settings_come_from_config(dagbag: Any, dag_id: str) -> None:
     dag = dagbag.get_dag(dag_id)
     p = CFG.pipeline
     assert dag.catchup is p.catchup
-    assert dag.max_active_runs == p.max_active_runs
+    key = {IDS.ingest: "ingest", IDS.silver: "silver", IDS.gold: "gold"}[dag_id]
+    assert dag.max_active_runs == getattr(p.max_active_runs, key)
     assert dag.dagrun_timeout.total_seconds() == p.dagrun_timeout_minutes * 60
     assert dag.is_paused_upon_creation is False  # recreated Composer resumes by itself
     assert CFG.env in set(dag.tags)
@@ -68,10 +69,10 @@ def test_schedules(dagbag: Any) -> None:
     def kind(dag_id: str) -> str:
         return type(dagbag.get_dag(dag_id).timetable).__name__
 
-    # Silver and gold run only when triggered; ingest runs on the configured schedule.
+    # Silver and gold run only when triggered; ingest follows config (null = on-demand).
     assert kind(IDS.silver) == "NullTimetable"
     assert kind(IDS.gold) == "NullTimetable"
-    assert kind(IDS.ingest) != "NullTimetable"
+    assert (kind(IDS.ingest) == "NullTimetable") is (CFG.pipeline.schedule is None)
 
 
 def _up(dag: Any, task_id: str) -> set[str]:
@@ -114,3 +115,22 @@ def test_trigger_targets_exist(dagbag: Any) -> None:
             target = getattr(t, "trigger_dag_id", None)
             if target:
                 assert target in dagbag.dag_ids, f"{dag.dag_id}.{t.task_id} -> {target}"
+
+
+def test_cron_schedule_gives_real_hourly_intervals() -> None:
+    """Airflow 3's default for cron strings has zero-length intervals (start == end),
+    which broke the scheduled ingest run in the first live cycle. Guard against it."""
+    import pendulum  # Airflow timetables take pendulum datetimes
+
+    from iot_pipeline.airflow_support import ingest_schedule
+
+    hourly = CFG.model_copy(
+        update={"pipeline": CFG.pipeline.model_copy(update={"schedule": "@hourly"})}
+    )
+    tt = ingest_schedule(hourly)
+    assert type(tt).__name__ == "CronDataIntervalTimetable"
+    interval = tt.infer_manual_data_interval(
+        run_after=pendulum.datetime(2026, 11, 9, 8, 30, tz="UTC")
+    )
+    assert (interval.end - interval.start).total_seconds() == 3600
+    assert ingest_schedule(CFG) is None or CFG.pipeline.schedule is not None

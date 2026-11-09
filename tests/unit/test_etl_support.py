@@ -101,6 +101,8 @@ def test_dag_kwargs_from_config() -> None:
     assert kw["dag_id"] == CFG.pipeline.dags.ingest
     assert kw["catchup"] is CFG.pipeline.catchup
     assert kw["is_paused_upon_creation"] is False
+    assert kw["max_active_runs"] == CFG.pipeline.max_active_runs.ingest
+    assert dag_kwargs(CFG, "silver", doc_md="x")["max_active_runs"] == 1
     assert {"raw", CFG.env} <= set(kw["tags"])
 
 
