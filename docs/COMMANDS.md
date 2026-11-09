@@ -407,3 +407,41 @@ Iterations:
 1. Airflow 3.3 removed `DagBag(include_examples=...)`. Examples are now disabled via `AIRFLOW__CORE__LOAD_EXAMPLES`.
 2. `NullTimetable` has no `.summary`, so the schedule test now asserts the timetable type.
 3. **11 passed** on Airflow 3.3.1 / Python 3.11 / Linux in 35s.
+
+---
+
+## Step 1 · Phase G: Ephemeral Composer lifecycle (create → run DAGs → destroy → recreate)
+
+### G.1 Branch (stacked on Phase E) 🛠️
+
+```bash
+git checkout -b feat/composer-lifecycle feat/phase-e-dags
+```
+
+### G.2 Static checks 🔍
+
+```bash
+terraform -chdir=infra/terraform/20-composer init -backend=false && TF_VAR_env=dev terraform -chdir=infra/terraform/20-composer validate
+terraform -chdir=infra/terraform/20-composer providers lock -platform=linux_amd64 -platform=windows_amd64 -platform=darwin_arm64 -platform=darwin_amd64
+uv run ruff check . && uv run mypy && uv run pytest -q          # 94 passed
+```
+
+### G.3 Read-only previews 🔍
+
+```bash
+uv run python scripts/composer_lifecycle.py status      # environment NOT CREATED, last raw batch 04:00, watermark
+uv run python scripts/composer_lifecycle.py plan        # hours `run` would ingest + deploy dry run (31 uploads)
+uv run python scripts/tf.py plan foundation             # 1 to add: Composer agent objectAdmin on the Composer bucket
+uv run python scripts/tf.py plan composer               # 1 to add: the Composer 3 environment
+```
+
+### G.4 Apply and run ☁️ (requires the repo owner's go-ahead: creates and destroys paid resources)
+
+```bash
+uv run python scripts/tf.py apply foundation            # 1 binding (needed before Composer can use our bucket)
+uv run python scripts/composer_lifecycle.py cycle       # up -> deploy -> run -> down (~45 min)
+uv run python scripts/composer_lifecycle.py status      # environment NOT CREATED again; watermark advanced
+uv run python scripts/composer_lifecycle.py cycle       # recreate: resumes from the last published hour
+```
+
+Individual steps: `up` | `deploy` | `run` | `down`. Add `--keep` to `cycle` to leave the environment up for debugging (it is billed while it exists).

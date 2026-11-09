@@ -247,8 +247,12 @@ class ComposerWorkloads(_Strict):
     worker: WorkerSpec
 
 
-class SnapshotConfig(_Strict):
-    save_before_destroy: bool = False
+class LifecycleConfig(_Strict):
+    max_catchup_hours: Annotated[int, Field(ge=1, le=48)]
+    run_timeout_minutes: PositiveInt
+    poll_seconds: Annotated[int, Field(ge=5, le=300)]
+    quiet_polls: Annotated[int, Field(ge=1, le=10)]
+    destroy_on_failure: bool = True
 
 
 class ComposerConfig(_Strict):
@@ -256,11 +260,12 @@ class ComposerConfig(_Strict):
     image_version: str
     environment_size: str
     private_environment: bool = True
+    attach_vpc: bool = False
     resilience_mode: str = "STANDARD_RESILIENCE"
     workloads: ComposerWorkloads
     airflow_config_overrides: dict[str, str] = Field(default_factory=dict)
     env_variables: dict[str, str] = Field(default_factory=dict)
-    snapshot: SnapshotConfig = SnapshotConfig()
+    lifecycle: LifecycleConfig
 
     @field_validator("image_version")
     @classmethod

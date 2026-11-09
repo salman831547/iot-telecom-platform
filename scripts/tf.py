@@ -82,7 +82,9 @@ def cmd_init(cfg: EnvConfig, layer: str, extra: list[str]) -> None:
 
 def cmd_passthrough(cfg: EnvConfig, layer: str, action: str, extra: list[str]) -> None:
     env = tf_env(cfg)
-    if not (LAYER_DIRS[layer] / ".terraform").is_dir():
+    # `.terraform/terraform.tfstate` records the initialised backend; a bare `.terraform/`
+    # (e.g. from `init -backend=false` for validation) is not enough to plan or apply.
+    if not (LAYER_DIRS[layer] / ".terraform" / "terraform.tfstate").is_file():
         cmd_init(cfg, layer, [])
     run([action, *extra], LAYER_DIRS[layer], env)
 
