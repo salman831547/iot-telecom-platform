@@ -1,0 +1,23 @@
+{
+  "description": "Hourly radio-network KPIs per serving cell. Affected partitions are rebuilt on each run, so re-runs are idempotent.",
+  "partitioning": { "type": "DAY", "field": "event_date" },
+  "require_partition_filter": true,
+  "clustering": ["cell_id"],
+  "schema": [
+    { "name": "event_date", "type": "DATE", "mode": "REQUIRED", "description": "Partition column." },
+    { "name": "event_hour", "type": "TIMESTAMP", "mode": "REQUIRED", "description": "Hour bucket (UTC, truncated)." },
+    { "name": "cell_id", "type": "STRING", "mode": "REQUIRED", "description": "Serving cell identifier." },
+    { "name": "mcc", "type": "STRING", "mode": "NULLABLE", "description": "Mobile Country Code." },
+    { "name": "mnc", "type": "STRING", "mode": "NULLABLE", "description": "Mobile Network Code." },
+    { "name": "tac", "type": "INT64", "mode": "NULLABLE", "description": "Tracking Area Code." },
+    { "name": "active_devices", "type": "INT64", "mode": "REQUIRED", "description": "Distinct devices seen on the cell." },
+    { "name": "event_count", "type": "INT64", "mode": "REQUIRED", "description": "Valid events on the cell." },
+    { "name": "avg_rsrp_dbm", "type": "FLOAT64", "mode": "NULLABLE", "description": "Mean RSRP." },
+    { "name": "p10_rsrp_dbm", "type": "FLOAT64", "mode": "NULLABLE", "description": "10th percentile RSRP." },
+    { "name": "avg_rsrq_db", "type": "FLOAT64", "mode": "NULLABLE", "description": "Mean RSRQ." },
+    { "name": "avg_sinr_db", "type": "FLOAT64", "mode": "NULLABLE", "description": "Mean SINR." },
+    { "name": "poor_coverage_ratio", "type": "FLOAT64", "mode": "NULLABLE", "description": "Share of events with RSRP below -110 dBm." },
+    { "name": "total_bytes", "type": "INT64", "mode": "NULLABLE", "description": "Uplink + downlink bytes." },
+    { "name": "updated_at", "type": "TIMESTAMP", "mode": "REQUIRED", "description": "When this row was computed." }
+  ]
+}

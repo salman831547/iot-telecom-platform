@@ -209,3 +209,59 @@ git add -A; git commit -F <path-to>/commit-msg.txt
 git push
 gh pr create --base main --head feat/phase-b-bootstrap --title "<...>" --body-file <path-to>/pr-body.md
 ```
+
+---
+
+## Step 1 · Phase C: Foundation layer (network, buckets, BigQuery, runtime IAM, secret)
+
+### C.1 Merge Phase B and branch ☁️
+
+```powershell
+gh pr merge 1 --repo salman831547/iot-telecom-platform --squash --delete-branch
+git checkout main; git pull --ff-only; git branch -D feat/phase-b-bootstrap
+git checkout -b feat/phase-c-foundation
+```
+
+### C.2 Static checks 🔍
+
+```bash
+terraform -chdir=infra/terraform/10-foundation fmt
+terraform -chdir=infra/terraform/10-foundation init -backend=false -input=false
+TF_VAR_env=dev terraform -chdir=infra/terraform/10-foundation validate
+uv run pytest -q          # 28 passed: config + table-definition contracts
+uv run ruff check . && uv run ruff format . && uv run mypy
+```
+
+### C.3 Plan → review → apply ☁️
+
+```bash
+uv run python scripts/tf.py init foundation
+uv run python scripts/tf.py plan foundation -- -out=foundation.tfplan   # Plan: 32 to add, 0 change, 0 destroy
+# The PII salt is write-only, so the saved plan must not contain it:
+TF_VAR_env=dev terraform -chdir=infra/terraform/10-foundation show -json foundation.tfplan \
+  | grep -o '"secret_data_wo":[^,]*'                                        # "secret_data_wo":null
+TF_VAR_env=dev terraform -chdir=infra/terraform/10-foundation apply foundation.tfplan   # 32 added
+rm infra/terraform/10-foundation/foundation.tfplan
+```
+
+### C.4 Verify 🔍
+
+```bash
+uv run python scripts/tf.py plan foundation -- -detailed-exitcode     # No changes, exit 0
+# Secret value must never be in state (expect 0):
+TF_VAR_env=dev terraform -chdir=infra/terraform/10-foundation state pull | grep -c '"secret_data"\s*:\s*"[^"]'
+gcloud secrets versions list iot-dev-pii-hash-salt                    # 1 enabled
+uv run python scripts/verify_foundation.py                            # PASSED (buckets, datasets, tables)
+```
+
+> In Git Bash, the `bq` and `gcloud storage` wrappers fail with `python3.11: command not found`.
+> `scripts/verify_foundation.py` uses the Python clients instead and works in every shell.
+
+### C.5 Lock providers, commit, PR ☁️
+
+```bash
+terraform -chdir=infra/terraform/10-foundation providers lock \
+  -platform=linux_amd64 -platform=windows_amd64 -platform=darwin_arm64 -platform=darwin_amd64
+git add -A && git commit -F <path-to>/commit-msg.txt && git push -u origin feat/phase-c-foundation
+gh pr create --base main --head feat/phase-c-foundation --title "<...>" --body-file <path-to>/pr-body.md
+```

@@ -1,0 +1,27 @@
+{
+  "description": "Hourly KPIs per device. Affected partitions are rebuilt on each run, so re-runs are idempotent and late data is handled.",
+  "partitioning": { "type": "DAY", "field": "event_date" },
+  "require_partition_filter": true,
+  "clustering": ["device_id"],
+  "schema": [
+    { "name": "event_date", "type": "DATE", "mode": "REQUIRED", "description": "Partition column." },
+    { "name": "event_hour", "type": "TIMESTAMP", "mode": "REQUIRED", "description": "Hour bucket (UTC, truncated)." },
+    { "name": "device_id", "type": "STRING", "mode": "REQUIRED", "description": "Device identifier." },
+    { "name": "device_type", "type": "STRING", "mode": "NULLABLE", "description": "Device category." },
+    { "name": "network_type", "type": "STRING", "mode": "NULLABLE", "description": "Most frequent RAT in the hour." },
+    { "name": "event_count", "type": "INT64", "mode": "REQUIRED", "description": "Valid events in the hour." },
+    { "name": "invalid_event_count", "type": "INT64", "mode": "REQUIRED", "description": "Events that failed data-quality rules." },
+    { "name": "alarm_count", "type": "INT64", "mode": "REQUIRED", "description": "ALARM events." },
+    { "name": "distinct_cells", "type": "INT64", "mode": "REQUIRED", "description": "Number of serving cells (mobility indicator)." },
+    { "name": "avg_rsrp_dbm", "type": "FLOAT64", "mode": "NULLABLE", "description": "Mean RSRP." },
+    { "name": "p10_rsrp_dbm", "type": "FLOAT64", "mode": "NULLABLE", "description": "10th percentile RSRP (worst-case coverage)." },
+    { "name": "avg_sinr_db", "type": "FLOAT64", "mode": "NULLABLE", "description": "Mean SINR." },
+    { "name": "min_battery_pct", "type": "FLOAT64", "mode": "NULLABLE", "description": "Lowest battery level." },
+    { "name": "battery_drain_pct", "type": "FLOAT64", "mode": "NULLABLE", "description": "First minus last battery reading in the hour." },
+    { "name": "avg_temperature_c", "type": "FLOAT64", "mode": "NULLABLE", "description": "Mean temperature." },
+    { "name": "max_temperature_c", "type": "FLOAT64", "mode": "NULLABLE", "description": "Peak temperature." },
+    { "name": "total_bytes_up", "type": "INT64", "mode": "NULLABLE", "description": "Uplink bytes." },
+    { "name": "total_bytes_down", "type": "INT64", "mode": "NULLABLE", "description": "Downlink bytes." },
+    { "name": "updated_at", "type": "TIMESTAMP", "mode": "REQUIRED", "description": "When this row was computed." }
+  ]
+}

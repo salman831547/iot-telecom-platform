@@ -1,0 +1,23 @@
+{
+  "description": "Append-only audit log of every pipeline task outcome (row counts, DQ results, lineage). Survives Composer recreation.",
+  "partitioning": { "type": "DAY", "field": "created_at" },
+  "require_partition_filter": false,
+  "clustering": ["dag_id", "status"],
+  "schema": [
+    { "name": "audit_id", "type": "STRING", "mode": "REQUIRED", "description": "Unique id: dag_id|run_id|task_id|try_number." },
+    { "name": "dag_id", "type": "STRING", "mode": "REQUIRED", "description": "Airflow DAG id." },
+    { "name": "run_id", "type": "STRING", "mode": "REQUIRED", "description": "Airflow run id." },
+    { "name": "task_id", "type": "STRING", "mode": "REQUIRED", "description": "Airflow task id." },
+    { "name": "layer", "type": "STRING", "mode": "REQUIRED", "description": "raw, silver or gold." },
+    { "name": "status", "type": "STRING", "mode": "REQUIRED", "description": "SUCCESS, SKIPPED, FAILED or DQ_FAILED." },
+    { "name": "data_interval_start", "type": "TIMESTAMP", "mode": "NULLABLE", "description": "Airflow data interval start." },
+    { "name": "data_interval_end", "type": "TIMESTAMP", "mode": "NULLABLE", "description": "Airflow data interval end." },
+    { "name": "rows_in", "type": "INT64", "mode": "NULLABLE", "description": "Rows read." },
+    { "name": "rows_out", "type": "INT64", "mode": "NULLABLE", "description": "Rows written." },
+    { "name": "rows_rejected", "type": "INT64", "mode": "NULLABLE", "description": "Rows flagged invalid." },
+    { "name": "source_uri", "type": "STRING", "mode": "NULLABLE", "description": "Input URI or table." },
+    { "name": "target", "type": "STRING", "mode": "NULLABLE", "description": "Output URI or table." },
+    { "name": "details", "type": "JSON", "mode": "NULLABLE", "description": "Free-form metrics (DQ results, durations)." },
+    { "name": "created_at", "type": "TIMESTAMP", "mode": "REQUIRED", "description": "Audit record time. Partition column." }
+  ]
+}
